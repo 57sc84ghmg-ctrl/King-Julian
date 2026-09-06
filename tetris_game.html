@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>俄羅斯方塊</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --grid-line: rgba(255,255,255,0.06);
+    --accent: #ffd93d;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    touch-action: none;
+    user-select: none;
+  }
+  #wrap { display: flex; flex-direction: column; height: 100%; }
+  #scoreboard {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 18px;
+    color: #8b8b96;
+    font-size: 13px;
+  }
+  #scoreboard .val { font-size: 22px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  #canvasHolder { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; }
+  #gameCanvas { background: rgba(10,10,15,0.35); border-radius: 4px; }
+  #overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px;
+    background: rgba(10,10,15,1);
+    color: #f0f0f5;
+    text-align: center;
+    padding: 24px;
+  }
+  #overlay h1 { font-size: 22px; font-weight: 700; margin: 0; color: var(--accent); }
+  #overlay p { margin: 0; color: #8b8b96; font-size: 14px; line-height: 1.6; max-width: 280px; }
+  #startBtn {
+    margin-top: 6px; padding: 12px 32px; border-radius: 10px; border: none;
+    background: var(--accent); color: #0a0a0f; font-size: 16px; font-weight: 700; cursor: pointer;
+  }
+  #soundToggle {
+    position: absolute; top: 8px; right: 12px;
+    background: none; border: none; font-size: 20px; cursor: pointer; z-index: 5; opacity: 0.75;
+  }
+  #controls { display: flex; height: 96px; flex-shrink: 0; }
+  #controls .zone {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    color: #4a4a55; font-size: 20px; border-top: 1px solid #1c1c24;
+    border-right: 1px solid #1c1c24;
+  }
+  #controls .zone:last-child { border-right: none; }
+  #controls .zone.active { background: rgba(255,217,61,0.12); color: var(--accent); }
+  #footerSlogan {
+    text-align: center;
+    padding: 10px 0 14px;
+    color: #39ff6a;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    flex-shrink: 0;
+  }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="scoreboard">
+    <div>分數 <span class="val" id="scoreVal">0</span></div>
+    <div style="color:#5a5a66;">第 <span id="levelVal">1</span> 級</div>
+    <div>消除 <span class="val" id="linesVal" style="font-size:18px;">0</span></div>
+  </div>
+  <div id="canvasHolder">
+    <button id="soundToggle">🔊</button>
+    <canvas id="gameCanvas"></canvas>
+    <div id="overlay">
+      <h1>俄羅斯方塊</h1>
+      <p>左右移動、旋轉方塊、快速下墜，把方塊排滿整行來消除得分。</p>
+      <button id="startBtn">開始遊戲</button>
+    </div>
+  </div>
+  <div id="controls">
+    <div class="zone" id="leftZone">◀</div>
+    <div class="zone" id="rotateZone">⟳</div>
+    <div class="zone" id="downZone">▼</div>
+    <div class="zone" id="rightZone">▶</div>
+  </div>
+  <div id="footerSlogan">團結 —— 我們無所不在</div>
+</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const holder = document.getElementById('canvasHolder');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const soundToggle = document.getElementById('soundToggle');
+  const scoreVal = document.getElementById('scoreVal');
+  const levelVal = document.getElementById('levelVal');
+  const linesVal = document.getElementById('linesVal');
+  const overlayH1 = overlay.querySelector('h1');
+  const overlayP = overlay.querySelector('p');
+  const leftZone = document.getElementById('leftZone');
+  const rightZone = document.getElementById('rightZone');
+  const rotateZone = document.getElementById('rotateZone');
+  const downZone = document.getElementById('downZone');
+
+  let audioCtx = null;
+  let soundOn = true;
+  function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, duration, type, gainVal) {
+    if (!soundOn) return;
+    ensureAudio();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type || 'square';
+    osc.frequency.value = freq;
+    gain.gain.value = gainVal !== undefined ? gainVal : 0.12;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    const now = audioCtx.currentTime;
+    gain.gain.setValueAtTime(gain.gain.value, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+  function sfxMove() { beep(300, 0.04, 'square', 0.06); }
+  function sfxRotate() { beep(440, 0.05, 'square', 0.08); }
+  function sfxDrop() { beep(150, 0.08, 'triangle', 0.1); }
+  function sfxLine(n) {
+    const base = 523;
+    for (let i = 0; i < n; i++) {
+      setTimeout(() => beep(base + i * 130, 0.13, 'triangle', 0.14), i * 70);
+    }
+  }
+  function sfxLevelUp() {
+    [440, 554, 659, 880].forEach((f, i) => setTimeout(() => beep(f, 0.12, 'triangle', 0.13), i * 80));
+  }
+  function sfxGameOver() {
+    [300, 240, 180, 120].forEach((f, i) => setTimeout(() => beep(f, 0.25, 'sawtooth', 0.14), i * 130));
+  }
+  soundToggle.addEventListener('click', () => {
+    soundOn = !soundOn;
+    soundToggle.textContent = soundOn ? '🔊' : '🔇';
+    if (soundOn) ensureAudio();
+  });
+
+  window.addEventListener('resize', () => { layoutGame(); });
+
+  const COLS = 10, ROWS = 18;
+  let CELL = 24;
+  const COLORS = {
+    I: '#00f0ff', O: '#ffee00', T: '#e838ff', S: '#39ff6a',
+    Z: '#ff2d55', J: '#2d8bff', L: '#ff9d00'
+  };
+  const SHAPES = {
+    I: [[0,1],[1,1],[2,1],[3,1]],
+    O: [[1,0],[2,0],[1,1],[2,1]],
+    T: [[1,0],[0,1],[1,1],[2,1]],
+    S: [[1,0],[2,0],[0,1],[1,1]],
+    Z: [[0,0],[1,0],[1,1],[2,1]],
+    J: [[0,0],[0,1],[1,1],[2,1]],
+    L: [[2,0],[0,1],[1,1],[2,1]]
+  };
+  const PIECE_KEYS = Object.keys(SHAPES);
+
+  let grid;
+  let cur, curKey, curX, curY, curRot;
+  let bag = [];
+  let score = 0, lines = 0, level = 1;
+  let dropInterval = 800;
+  let dropTimer = 0;
+  let state = 'idle';
+  let lastTime = 0;
+
+  function layoutGame() {
+    const W = holder.clientWidth, H = holder.clientHeight;
+    CELL = Math.floor(Math.min(W / (COLS + 1), H / (ROWS + 1)));
+    CELL = Math.max(14, CELL);
+    const DPR = window.devicePixelRatio || 1;
+    canvas.width = COLS * CELL * DPR;
+    canvas.height = ROWS * CELL * DPR;
+    canvas.style.width = (COLS * CELL) + 'px';
+    canvas.style.height = (ROWS * CELL) + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  function newGrid() {
+    const g = [];
+    for (let r = 0; r < ROWS; r++) g.push(new Array(COLS).fill(null));
+    return g;
+  }
+
+  function refillBag() {
+    bag = PIECE_KEYS.slice();
+    for (let i = bag.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [bag[i], bag[j]] = [bag[j], bag[i]];
+    }
+  }
+
+  function rotateCells(cells, rot) {
+    let pts = cells.map(([x, y]) => [x, y]);
+    for (let i = 0; i < rot; i++) {
+      pts = pts.map(([x, y]) => [ (3 - y), x ]);
+    }
+    return pts;
+  }
+
+  function spawnPiece() {
+    if (bag.length === 0) refillBag();
+    curKey = bag.pop();
+    curRot = 0;
+    cur = SHAPES[curKey];
+    curX = COLS / 2 - 2;
+    curY = -1;
+    if (collides(cur, curX, curY, curRot)) {
+      gameOver();
+    }
+  }
+
+  function collides(shape, ox, oy, rot) {
+    const pts = rotateCells(shape, rot);
+    for (const [px, py] of pts) {
+      const x = ox + px, y = oy + py;
+      if (x < 0 || x >= COLS || y >= ROWS) return true;
+      if (y >= 0 && grid[y][x]) return true;
+    }
+    return false;
+  }
+
+  function lockPiece() {
+    const pts = rotateCells(cur, curRot);
+    for (const [px, py] of pts) {
+      const x = curX + px, y = curY + py;
+      if (y >= 0) grid[y][x] = curKey;
+    }
+    sfxDrop();
+    clearLines();
+    spawnPiece();
+  }
+
+  function clearLines() {
+    let cleared = 0;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (grid[r].every(c => c !== null)) {
+        grid.splice(r, 1);
+        grid.unshift(new Array(COLS).fill(null));
+        cleared++;
+        r++;
+      }
+    }
+    if (cleared > 0) {
+      const points = [0, 100, 300, 500, 800][cleared] * level;
+      score += points;
+      lines += cleared;
+      scoreVal.textContent = score;
+      linesVal.textContent = lines;
+      sfxLine(cleared);
+      const newLevel = Math.floor(lines / 10) + 1;
+      if (newLevel !== level) {
+        level = newLevel;
+        levelVal.textContent = level;
+        dropInterval = Math.max(120, 800 - (level - 1) * 70);
+        sfxLevelUp();
+      }
+    }
+  }
+
+  function tryMove(dx, dy) {
+    if (!collides(cur, curX + dx, curY + dy, curRot)) {
+      curX += dx; curY += dy;
+      return true;
+    }
+    return false;
+  }
+
+  function tryRotate() {
+    const newRot = (curRot + 1) % 4;
+    const kicks = [0, -1, 1, -2, 2];
+    for (const k of kicks) {
+      if (!collides(cur, curX + k, curY, newRot)) {
+        curX += k;
+        curRot = newRot;
+        sfxRotate();
+        return;
+      }
+    }
+  }
+
+  function hardDrop() {
+    let dist = 0;
+    while (!collides(cur, curX, curY + 1, curRot)) { curY++; dist++; }
+    score += dist * 2;
+    scoreVal.textContent = score;
+    lockPiece();
+  }
+
+  function resetGame() {
+    layoutGame();
+    grid = newGrid();
+    score = 0; lines = 0; level = 1;
+    dropInterval = 800; dropTimer = 0;
+    scoreVal.textContent = '0';
+    linesVal.textContent = '0';
+    levelVal.textContent = '1';
+    bag = [];
+    spawnPiece();
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    overlay.classList.add('hidden');
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+  startBtn.addEventListener('click', startGame);
+
+  function gameOver() {
+    state = 'over';
+    overlayH1.textContent = '遊戲結束';
+    overlayH1.style.color = '#ff6b6b';
+    overlayP.textContent = `最終分數 ${score}，消除 ${lines} 行，第 ${level} 級。再玩一次？`;
+    startBtn.textContent = '再玩一次';
+    overlay.classList.remove('hidden');
+    sfxGameOver();
+  }
+
+  function bindTap(el, fn) {
+    let fired = false;
+    el.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      fired = true;
+      el.classList.add('active');
+      fn();
+    }, { passive: false });
+    el.addEventListener('touchend', (e) => { e.preventDefault(); el.classList.remove('active'); fired = false; }, { passive: false });
+    el.addEventListener('mousedown', () => { if (!fired) { fn(); } });
+  }
+  bindTap(leftZone, () => { if (state === 'playing') { tryMove(-1, 0); sfxMove(); } });
+  bindTap(rightZone, () => { if (state === 'playing') { tryMove(1, 0); sfxMove(); } });
+  bindTap(rotateZone, () => { if (state === 'playing') tryRotate(); });
+  bindTap(downZone, () => { if (state === 'playing') hardDrop(); });
+
+  let touchStartX = null, touchStartY = null, touchMoved = false;
+  canvas.addEventListener('touchstart', (e) => {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    touchMoved = false;
+  }, { passive: true });
+  canvas.addEventListener('touchmove', (e) => {
+    if (touchStartX === null || state !== 'playing') return;
+    const dx = e.touches[0].clientX - touchStartX;
+    const dy = e.touches[0].clientY - touchStartY;
+    if (Math.abs(dx) > CELL) {
+      tryMove(dx > 0 ? 1 : -1, 0);
+      sfxMove();
+      touchStartX = e.touches[0].clientX;
+      touchMoved = true;
+    } else if (dy > CELL * 1.5) {
+      tryMove(0, 1);
+      touchStartY = e.touches[0].clientY;
+      touchMoved = true;
+    }
+  }, { passive: true });
+  canvas.addEventListener('touchend', () => {
+    if (!touchMoved && state === 'playing') tryRotate();
+    touchStartX = null; touchStartY = null;
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (state !== 'playing') return;
+    if (e.key === 'ArrowLeft') { tryMove(-1, 0); sfxMove(); }
+    if (e.key === 'ArrowRight') { tryMove(1, 0); sfxMove(); }
+    if (e.key === 'ArrowDown') tryMove(0, 1);
+    if (e.key === 'ArrowUp') tryRotate();
+    if (e.key === ' ') hardDrop();
+  });
+
+  function update(dt) {
+    dropTimer += dt * 1000;
+    if (dropTimer >= dropInterval) {
+      dropTimer = 0;
+      if (!tryMove(0, 1)) {
+        lockPiece();
+      }
+    }
+  }
+
+  function drawCell(x, y, color) {
+    const px = x * CELL, py = y * CELL;
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = CELL * 0.5;
+    ctx.fillStyle = color;
+    ctx.fillRect(px + 1, py + 1, CELL - 2, CELL - 2);
+    ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillRect(px + 1, py + 1, CELL - 2, 4);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillRect(px + 1, py + 1, 3, CELL - 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fillRect(px + 1, py + CELL - 5, CELL - 2, 4);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, COLS * CELL, ROWS * CELL);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    for (let c = 0; c <= COLS; c++) {
+      ctx.beginPath(); ctx.moveTo(c * CELL, 0); ctx.lineTo(c * CELL, ROWS * CELL); ctx.stroke();
+    }
+    for (let r = 0; r <= ROWS; r++) {
+      ctx.beginPath(); ctx.moveTo(0, r * CELL); ctx.lineTo(COLS * CELL, r * CELL); ctx.stroke();
+    }
+
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        if (grid[r][c]) drawCell(c, r, COLORS[grid[r][c]]);
+      }
+    }
+
+    if (cur) {
+      const pts = rotateCells(cur, curRot);
+      for (const [px, py] of pts) {
+        const y = curY + py;
+        if (y >= 0) drawCell(curX + px, y, COLORS[curKey]);
+      }
+    }
+  }
+
+  function loop(now) {
+    if (state !== 'playing') return;
+    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  layoutGame();
+  grid = newGrid();
+  cur = null;
+  draw();
+})();
+</script>
+</body>
+</html>
