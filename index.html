@@ -277,8 +277,8 @@ async function runSearch(){
     twoYearsAgo.setFullYear(today.getFullYear() - 2);
     const startDate = twoYearsAgo.toISOString().slice(0,10);
 
-    const url = 'https://api.finmindtrade.com/api/v3/data?dataset=FinancialStatements&stock_id='
-      + encodeURIComponent(code) + '&date=' + startDate;
+    const url = 'https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockFinancialStatements&data_id='
+      + encodeURIComponent(code) + '&start_date=' + startDate;
 
     const resp = await fetch(url);
     if(!resp.ok){
