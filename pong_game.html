@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>乒乓球 Pong</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --line: #2a3140;
+    --p1: #58a6ff;
+    --p2: #ff7b72;
+    --accent: #3fb950;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    touch-action: none;
+    user-select: none;
+  }
+  #wrap {
+    display: flex; flex-direction: column; height: 100%;
+  }
+  #scoreboard {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 20px;
+    color: #8b949e;
+    font-size: 14px;
+    letter-spacing: 0.02em;
+  }
+  #scoreboard .score {
+    font-size: 28px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  #p1score { color: var(--p1); }
+  #p2score { color: var(--p2); }
+  #canvasHolder {
+    flex: 1; position: relative;
+  }
+  canvas {
+    display: block;
+    width: 100%; height: 100%;
+    background: var(--bg);
+  }
+  #overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px;
+    background: rgba(13,17,23,0.88);
+    color: #e6edf3;
+    text-align: center;
+    padding: 24px;
+  }
+  #overlay h1 {
+    font-size: 22px; font-weight: 600; margin: 0;
+    color: var(--accent);
+  }
+  #overlay p { margin: 0; color: #8b949e; font-size: 14px; line-height: 1.5; max-width: 280px; }
+  #startBtn {
+    margin-top: 8px;
+    padding: 12px 32px;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent);
+    color: #0d1117;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #soundToggle {
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    z-index: 5;
+    opacity: 0.8;
+  }
+  #hint {
+    text-align: center;
+    color: #484f58;
+    font-size: 12px;
+    padding: 10px 0 16px;
+  }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="scoreboard">
+    <div>你 <span class="score" id="p1score">0</span></div>
+    <div style="color:#484f58;">先得 7 分獲勝</div>
+    <div><span class="score" id="p2score">0</span> 電腦</div>
+  </div>
+  <div id="canvasHolder">
+    <button id="soundToggle">🔊</button>
+    <canvas id="game"></canvas>
+    <div id="overlay">
+      <h1>乒乓球</h1>
+      <p>手指拖動畫面下半部來控制你的球拍（藍色）。先得 7 分獲勝。</p>
+      <button id="startBtn">開始遊戲</button>
+    </div>
+  </div>
+  <div id="hint">拖曳畫面移動球拍</div>
+</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const holder = document.getElementById('canvasHolder');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const soundToggle = document.getElementById('soundToggle');
+  const p1scoreEl = document.getElementById('p1score');
+  const p2scoreEl = document.getElementById('p2score');
+  const overlayH1 = overlay.querySelector('h1');
+  const overlayP = overlay.querySelector('p');
+
+  const ballImg = new Image();
+  ballImg.src = "data:image/jpeg;base64,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";
+  let ballImgReady = false;
+  ballImg.onload = () => { ballImgReady = true; };
+
+  let audioCtx = null;
+  let soundOn = true;
+  function ensureAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, duration, type, gainVal) {
+    if (!soundOn) return;
+    ensureAudio();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type || 'square';
+    osc.frequency.value = freq;
+    gain.gain.value = gainVal !== undefined ? gainVal : 0.15;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    const now = audioCtx.currentTime;
+    gain.gain.setValueAtTime(gain.gain.value, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+  function sfxPaddleHit() { beep(420, 0.08, 'square', 0.18); }
+  function sfxWallBounce() { beep(280, 0.06, 'triangle', 0.12); }
+  function sfxScore(isPlayer) { beep(isPlayer ? 660 : 160, 0.28, 'sawtooth', 0.15); }
+  function sfxWin() {
+    if (!soundOn) return;
+    ensureAudio();
+    [523, 659, 784, 1046].forEach((f, i) => {
+      setTimeout(() => beep(f, 0.18, 'triangle', 0.16), i * 110);
+    });
+  }
+  function sfxLose() {
+    if (!soundOn) return;
+    ensureAudio();
+    [400, 320, 240, 160].forEach((f, i) => {
+      setTimeout(() => beep(f, 0.22, 'sawtooth', 0.14), i * 120);
+    });
+  }
+
+  soundToggle.addEventListener('click', () => {
+    soundOn = !soundOn;
+    soundToggle.textContent = soundOn ? '🔊' : '🔇';
+    if (soundOn) ensureAudio();
+  });
+
+  let W, H, DPR;
+  function resize() {
+    DPR = window.devicePixelRatio || 1;
+    W = holder.clientWidth;
+    H = holder.clientHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const PADDLE_W_RATIO = 0.24;
+  const PADDLE_H = 14;
+  const BALL_R = 22;
+  const WIN_SCORE = 7;
+
+  let state = 'idle';
+  let p1 = { x: 0, w: 0, score: 0 };
+  let p2 = { x: 0, w: 0, score: 0 };
+  let ball = { x: 0, y: 0, vx: 0, vy: 0, spin: 0 };
+  let ballAngle = 0;
+  let lastTime = 0;
+
+  function resetPaddles() {
+    p1.w = W * PADDLE_W_RATIO;
+    p2.w = W * PADDLE_W_RATIO;
+    p1.x = W / 2 - p1.w / 2;
+    p2.x = W / 2 - p2.w / 2;
+  }
+
+  function resetBall(direction) {
+    ball.x = W / 2;
+    ball.y = H / 2;
+    const speed = Math.min(W, H) * 0.55;
+    const angle = (Math.random() * 0.6 - 0.3);
+    ball.vx = speed * Math.sin(angle);
+    ball.vy = speed * Math.cos(angle) * (direction || 1);
+    ball.spin = (Math.random() - 0.5) * 4;
+  }
+
+  function startGame() {
+    ensureAudio();
+    resize();
+    resetPaddles();
+    p1.score = 0;
+    p2.score = 0;
+    p1scoreEl.textContent = '0';
+    p2scoreEl.textContent = '0';
+    resetBall(Math.random() > 0.5 ? 1 : -1);
+    state = 'playing';
+    overlay.classList.add('hidden');
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  startBtn.addEventListener('click', startGame);
+
+  function setPaddleX(clientX) {
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    p1.x = Math.max(0, Math.min(W - p1.w, x - p1.w / 2));
+  }
+  canvas.addEventListener('touchstart', (e) => {
+    if (state !== 'playing') return;
+    setPaddleX(e.touches[0].clientX);
+  }, { passive: true });
+  canvas.addEventListener('touchmove', (e) => {
+    if (state !== 'playing') return;
+    setPaddleX(e.touches[0].clientX);
+  }, { passive: true });
+  canvas.addEventListener('mousedown', (e) => {
+    if (state !== 'playing') return;
+    setPaddleX(e.clientX);
+  });
+  canvas.addEventListener('mousemove', (e) => {
+    if (state !== 'playing' || e.buttons !== 1) return;
+    setPaddleX(e.clientX);
+  });
+
+  function aiMove(dt) {
+    const targetCenter = ball.x;
+    const aiCenter = p2.x + p2.w / 2;
+    const maxSpeed = Math.min(W, H) * 0.85;
+    const diff = targetCenter - aiCenter;
+    const move = Math.sign(diff) * Math.min(Math.abs(diff), maxSpeed * dt);
+    p2.x += move;
+    p2.x = Math.max(0, Math.min(W - p2.w, p2.x));
+  }
+
+  function update(dt) {
+    aiMove(dt);
+
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
+    ballAngle += ball.spin * dt;
+
+    if (ball.x - BALL_R < 0) {
+      ball.x = BALL_R;
+      ball.vx *= -1;
+      sfxWallBounce();
+    } else if (ball.x + BALL_R > W) {
+      ball.x = W - BALL_R;
+      ball.vx *= -1;
+      sfxWallBounce();
+    }
+
+    const p1Y = H - 40;
+    if (ball.vy > 0 && ball.y + BALL_R >= p1Y && ball.y + BALL_R <= p1Y + PADDLE_H + 10) {
+      if (ball.x >= p1.x && ball.x <= p1.x + p1.w) {
+        ball.y = p1Y - BALL_R;
+        const hitPos = (ball.x - (p1.x + p1.w / 2)) / (p1.w / 2);
+        const speed = Math.hypot(ball.vx, ball.vy) * 1.04;
+        const angle = hitPos * 0.9;
+        ball.vx = speed * Math.sin(angle);
+        ball.vy = -Math.abs(speed * Math.cos(angle));
+        ball.spin = hitPos * 6;
+        sfxPaddleHit();
+      }
+    }
+
+    const p2Y = 40;
+    if (ball.vy < 0 && ball.y - BALL_R <= p2Y && ball.y - BALL_R >= p2Y - PADDLE_H - 10) {
+      if (ball.x >= p2.x && ball.x <= p2.x + p2.w) {
+        ball.y = p2Y + BALL_R;
+        const hitPos = (ball.x - (p2.x + p2.w / 2)) / (p2.w / 2);
+        const speed = Math.hypot(ball.vx, ball.vy) * 1.04;
+        const angle = hitPos * 0.9;
+        ball.vx = speed * Math.sin(angle);
+        ball.vy = Math.abs(speed * Math.cos(angle));
+        ball.spin = hitPos * 6;
+        sfxPaddleHit();
+      }
+    }
+
+    if (ball.y > H + BALL_R * 2) {
+      p2.score++;
+      p2scoreEl.textContent = p2.score;
+      sfxScore(false);
+      checkWin();
+      if (state === 'playing') resetBall(-1);
+    } else if (ball.y < -BALL_R * 2) {
+      p1.score++;
+      p1scoreEl.textContent = p1.score;
+      sfxScore(true);
+      checkWin();
+      if (state === 'playing') resetBall(1);
+    }
+  }
+
+  function checkWin() {
+    if (p1.score >= WIN_SCORE || p2.score >= WIN_SCORE) {
+      state = 'over';
+      const youWin = p1.score >= WIN_SCORE;
+      overlayH1.textContent = youWin ? '你贏了！' : '電腦贏了';
+      overlayH1.style.color = youWin ? '#3fb950' : '#ff7b72';
+      overlayP.textContent = `最終比分 ${p1.score} : ${p2.score}。再玩一次？`;
+      startBtn.textContent = '再玩一次';
+      overlay.classList.remove('hidden');
+      if (youWin) sfxWin(); else sfxLose();
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    ctx.strokeStyle = '#2a3140';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 10]);
+    ctx.beginPath();
+    ctx.moveTo(0, H / 2);
+    ctx.lineTo(W, H / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = '#58a6ff';
+    roundRect(ctx, p1.x, H - 40, p1.w, PADDLE_H, 6);
+    ctx.fill();
+
+    ctx.fillStyle = '#ff7b72';
+    roundRect(ctx, p2.x, 40 - PADDLE_H, p2.w, PADDLE_H, 6);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(ball.x, ball.y);
+    ctx.rotate(ballAngle);
+    ctx.beginPath();
+    ctx.arc(0, 0, BALL_R, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    if (ballImgReady) {
+      ctx.drawImage(ballImg, -BALL_R, -BALL_R, BALL_R * 2, BALL_R * 2);
+    } else {
+      ctx.fillStyle = '#f0f6fc';
+      ctx.fillRect(-BALL_R, -BALL_R, BALL_R * 2, BALL_R * 2);
+    }
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function loop(now) {
+    if (state !== 'playing') return;
+    const dt = Math.min(0.033, (now - lastTime) / 1000);
+    lastTime = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  resetPaddles();
+  ball.x = W / 2; ball.y = H / 2;
+  draw();
+})();
+</script>
+</body>
+</html>
